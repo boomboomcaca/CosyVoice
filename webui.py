@@ -1,4 +1,4 @@
-# Copyright (c) 2024 Alibaba Inc (authors: Xiang Lyu, Liu Yue)
+﻿# Copyright (c) 2024 Alibaba Inc (authors: Xiang Lyu, Liu Yue)
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,6 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import kaldifst
+from pathlib import Path
+#if not Path('./pretrained_models/Fun-CosyVoice3-0.5B/flow.decoder.estimator.fp32.onnx').exists():
+from modelscope import snapshot_download
+#    print(f'下载 FunAudioLLM/Fun-CosyVoice3-0.5B-2512 ...')
+
+
+
 import os
 import sys
 import argparse
@@ -57,6 +65,9 @@ def generate_audio(tts_text, mode_checkbox_group, sft_dropdown, prompt_text, pro
         prompt_wav = None
     # if instruct mode, please make sure that model is iic/CosyVoice-300M-Instruct and not cross_lingual mode
     if mode_checkbox_group in ['自然语言控制']:
+        if cosyvoice.instruct is False:
+            gr.Warning('您正在使用自然语言控制模式, {}模型不支持此模式, 请使用iic/CosyVoice-300M-Instruct模型'.format(args.model_dir))
+            yield (cosyvoice.sample_rate, default_data)
         if instruct_text == '':
             gr.Warning('您正在使用自然语言控制模式, 请输入instruct文本')
             yield (cosyvoice.sample_rate, default_data)
@@ -64,6 +75,9 @@ def generate_audio(tts_text, mode_checkbox_group, sft_dropdown, prompt_text, pro
             gr.Info('您正在使用自然语言控制模式, prompt音频/prompt文本会被忽略')
     # if cross_lingual mode, please make sure that model is iic/CosyVoice-300M and tts_text prompt_text are different language
     if mode_checkbox_group in ['跨语种复刻']:
+        if cosyvoice.instruct is True:
+            gr.Warning('您正在使用跨语种复刻模式, {}模型不支持此模式, 请使用iic/CosyVoice-300M模型'.format(args.model_dir))
+            yield (cosyvoice.sample_rate, default_data)
         if instruct_text != '':
             gr.Info('您正在使用跨语种复刻模式, instruct文本会被忽略')
         if prompt_wav is None:
@@ -142,7 +156,7 @@ def main():
 
         generate_button = gr.Button("生成音频")
 
-        audio_output = gr.Audio(label="合成音频", autoplay=True, streaming=True)
+        audio_output = gr.Audio(label="合成音频", autoplay=True, streaming=False)
 
         seed_button.click(generate_seed, inputs=[], outputs=seed)
         generate_button.click(generate_audio,
@@ -151,7 +165,17 @@ def main():
                               outputs=[audio_output])
         mode_checkbox_group.change(fn=change_instruction, inputs=[mode_checkbox_group], outputs=[instruction_text])
     demo.queue(max_size=4, default_concurrency_limit=2)
-    demo.launch(server_name='0.0.0.0', server_port=args.port)
+    
+    def _opbrowser():
+        import webbrowser,time
+        time.sleep(5)
+        webbrowser.open_new_tab(f'http://127.0.0.1:8000')
+    import threading
+    threading.Thread(target=_opbrowser).start()
+    print('[]======start===')
+    import tempfile
+    temp_dir = tempfile.gettempdir()
+    demo.launch(server_name='0.0.0.0', server_port=args.port,show_error=True,allowed_paths=[temp_dir])
 
 
 if __name__ == '__main__':
@@ -161,14 +185,22 @@ if __name__ == '__main__':
                         default=8000)
     parser.add_argument('--model_dir',
                         type=str,
-                        default='pretrained_models/CosyVoice2-0.5B',
+                        default='FunAudioLLM/Fun-CosyVoice3-0.5B-2512',
                         help='local path or modelscope repo id')
     args = parser.parse_args()
+    print(f'{args.model_dir=}')
+    if args.model_dir=='iic/CosyVoice-300M-SFT':
+        snapshot_download('iic/CosyVoice-300M-SFT')
+    else:
+        inference_mode_list = ['3s极速复刻','预训练音色',  '跨语种复刻', '自然语言控制']
+        snapshot_download('FunAudioLLM/Fun-CosyVoice3-0.5B-2512')
     cosyvoice = AutoModel(model_dir=args.model_dir)
 
     sft_spk = cosyvoice.list_available_spks()
+    print(f'{sft_spk=}')
     if len(sft_spk) == 0:
         sft_spk = ['']
     prompt_sr = 16000
     default_data = np.zeros(cosyvoice.sample_rate)
     main()
+
